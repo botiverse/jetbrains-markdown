@@ -157,7 +157,7 @@ class _GFMLexer : GeneratedLexer {
         return result
     }
 
-    private fun calcBalance(startPos: Int): Int {
+    private fun findMatchingOpeningParen(startPos: Int): Int {
         var balance = 0
         for (i in startPos downTo 0) {
             val c = yycharat(i)
@@ -165,40 +165,73 @@ class _GFMLexer : GeneratedLexer {
                 balance++
             } else if (c == '(') {
                 balance--
-                if (balance <= 0) break
+                if (balance == 0) return i
             }
         }
-        return balance
+        return -1
+    }
+
+    private fun isPrecededByOpener(delim: Char): Boolean {
+        if (tokenStart <= 0) return false
+        if (delim == '_') {
+            if (zzBuffer[tokenStart - 1] == '_') {
+                if (tokenStart >= 2 && zzBuffer[tokenStart - 2] == '_') {
+                    return false
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun isDelimiterBeforeParen(openPos: Int): Boolean {
+        if (openPos <= 0) return false
+        val prevC = yycharat(openPos - 1)
+        if (prevC == '*' || prevC == '~' || prevC == ']' || prevC == '"' || prevC == '\'') {
+            return true
+        }
+        if (prevC == '_') {
+            if (openPos > 1 && yycharat(openPos - 2) == '_') {
+                return true
+            }
+            if (isPrecededByOpener('_')) {
+                return true
+            }
+        }
+        return false
     }
 
     private fun pushbackAutolink() {
         var length = yylength()
         if (yycharat(length - 1) == '/') {
-            while (yycharat(length - 2) == '/') length--
+            while (length > 1 && yycharat(length - 2) == '/') length--
             yypushback(yylength() - length)
             return
         }
-        var balance = -1
 
         // See GFM_AUTOLINK rule
         val badEnding = ".,:;!?\"'*_~]`"
-        for (i in length - 1 downTo 0) {
-            val c = yycharat(i)
+        while (length > 0) {
+            val c = yycharat(length - 1)
             if (c == ')') {
-                if (balance == -1) {
-                    balance = calcBalance(i)
+                val openPos = findMatchingOpeningParen(length - 1)
+                if (openPos == -1) {
+                    length--
+                    continue
                 }
 
-                // If there are not enough opening brackets to match this closing one, drop this bracket
-                if (balance > 0) {
-                    balance--
+                if (isDelimiterBeforeParen(openPos)) {
+                    length = openPos
+                    continue
                 } else {
                     break
                 }
-            } else if (badEnding.indexOf(c) == -1) {
+            } else if (badEnding.indexOf(c) != -1) {
+                length--
+                continue
+            } else {
                 break
             }
-            length--
         }
         yypushback(yylength() - length)
     }
