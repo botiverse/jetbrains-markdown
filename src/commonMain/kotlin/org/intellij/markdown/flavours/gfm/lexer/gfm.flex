@@ -154,7 +154,7 @@ import org.intellij.markdown.lexer.GeneratedLexer;
     return result;
   }
 
-  private int calcBalance(int startPos) {
+  private int findMatchingOpeningParen(int startPos) {
       int balance = 0;
       for (int i = startPos; i >= 0; --i) {
           char c = yycharat(i);
@@ -163,45 +163,77 @@ import org.intellij.markdown.lexer.GeneratedLexer;
           }
           else if (c == '(') {
               balance--;
-              if (balance <= 0) break;
+              if (balance == 0) return i;
           }
       }
-      return balance;
+      return -1;
+  }
+
+  private boolean isPrecededByOpener(char delim) {
+      if (getTokenStart() <= 0) return false;
+      if (delim == '_') {
+          if (zzBuffer.charAt(getTokenStart() - 1) == '_') {
+              if (getTokenStart() >= 2 && zzBuffer.charAt(getTokenStart() - 2) == '_') {
+                  return false;
+              }
+              return true;
+          }
+      }
+      return false;
+  }
+
+  private boolean isDelimiterBeforeParen(int openPos) {
+      if (openPos <= 0) return false;
+      char prevC = yycharat(openPos - 1);
+      if (prevC == '*' || prevC == '~' || prevC == ']' || prevC == '"' || prevC == '\'') {
+          return true;
+      }
+      if (prevC == '_') {
+          if (openPos > 1 && yycharat(openPos - 2) == '_') {
+              return true;
+          }
+          if (isPrecededByOpener('_')) {
+              return true;
+          }
+      }
+      return false;
   }
 
   private void pushbackAutolink() {
       int length = yylength();
       if (yycharat(length - 1) == '/') {
-          while (yycharat(length - 2) == '/') length--;
+          while (length > 1 && yycharat(length - 2) == '/') length--;
           yypushback(yylength() - length);
           return;
       }
 
-      int balance = -1;
-
       // See GFM_AUTOLINK rule
       String badEnding = ".,:;!?\"'*_~]`";
 
-      for (int i = length - 1; i >= 0; --i) {
-          char c = yycharat(i);
+      while (length > 0) {
+          char c = yycharat(length - 1);
           if (c == ')') {
-              if (balance == -1) {
-                  balance = calcBalance(i);
+              int openPos = findMatchingOpeningParen(length - 1);
+              if (openPos == -1) {
+                  length--;
+                  continue;
               }
 
-              // If there are not enough opening brackets to match this closing one, drop this bracket
-              if (balance > 0) {
-                  balance--;
+              if (isDelimiterBeforeParen(openPos)) {
+                  length = openPos;
+                  continue;
               }
               else {
                   break;
               }
           }
-          else if (badEnding.indexOf(c) == -1) {
+          else if (badEnding.indexOf(c) != -1) {
+              length--;
+              continue;
+          }
+          else {
               break;
           }
-
-          length--;
       }
 
       yypushback(yylength() - length);
